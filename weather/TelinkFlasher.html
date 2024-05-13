@@ -1,0 +1,73 @@
+<!-- Copyright: Aaron Christophel / Atc1441 https://atcnetz.de -->
+<html class="telFlasherClass" lang=""><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Telink Flasher</title>
+<script type="text/javascript" src="./core.js"></script>
+</head><body><script>
+
+let bluetoothDevice, gattServer, ServiceMain, nitifiyCharTemp;
+
+const UUID = 'ebe0ccb0-7a0a-4b0c-8a1a-6ff2997da3a6';
+const TEMP_CHARACTERISTIC_UUID = 'ebe0ccc1-7a0a-4b0c-8a1a-6ff2997da3a6';
+const SERVICE = '00010203-0405-0607-0809-0a0b0c0d1912';
+
+async function connect() {
+    const deviceOptions = {
+        optionalServices: [SERVICE, UUID, 0xfe95, 0x1f10],
+        acceptAllDevices: true,
+    };
+
+    if (bluetoothDevice != null) bluetoothDevice.gatt.disconnect();
+    addLog("Searching for devices");
+
+    bluetoothDevice = await navigator.bluetooth.requestDevice(deviceOptions);
+    addLog("Connecting to: " + bluetoothDevice.name);
+    await miAction();
+}
+
+async function miAction() {
+    gattServer = await bluetoothDevice.gatt.connect();
+    addLog("Connected");
+    ServiceMain = await gattServer.getPrimaryService(UUID);
+    nitifiyCharTemp = await ServiceMain.getCharacteristic(TEMP_CHARACTERISTIC_UUID);
+    await nitifiyCharTemp.startNotifications();
+    nitifiyCharTemp.addEventListener('characteristicvaluechanged', handleCharacteristicValueChanged);
+}
+
+function handleCharacteristicValueChanged(event) {
+    const value = event.target.value;
+    const sign = value.getUint8(1) & (1 << 7);
+    let temperature = ((value.getUint8(1) & 0x7F) << 8 | value.getUint8(0));
+    if(sign) temperature = temperature-32767;
+    temperature = temperature/100;
+    const humidity = value.getUint8(2);
+
+    document.getElementById("Data").innerHTML = "Temperature/Humidity: " + temperature + "°C / " + humidity + "%";
+    sendServerData(temperature, humidity);
+}
+
+async function sendServerData(temperature, humidity) {
+    const time = new Date().toLocaleTimeString("de-DE");
+    const data = { temperature: temperature, humidity: humidity, time: time};
+    addLog('Sending data to server')
+
+    await fetch('http://localhost:8080/update-csv', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+    });
+}
+
+function addLog(logTXT) {
+    const log = new Date().toLocaleTimeString("de-DE") + ": " + logTXT;
+    document.getElementById("log").innerHTML += log + "<br>";
+}
+
+</script>
+Telink Flasher for Mi Thermostat<br>
+<button type="button" onclick="connect();">Connect</button><hr>
+<div id="Data">Temperature/Humidity: waiting for data</div><hr>
+<div id="log">Log:<br></div>
+</body></html>
